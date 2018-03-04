@@ -5,14 +5,11 @@
 # changes to this script, consider a proposal to conda-smithy so that other feedstocks can also
 # benefit from the improvement.
 
-set -euo pipefail
+set -xeuo pipefail
 
 FEEDSTOCK_ROOT=$(cd "$(dirname "$0")/.."; pwd;)
 RECIPE_ROOT=$FEEDSTOCK_ROOT/recipe
-# ensure BINSTAR_TOKEN is defined even if empty
-export BINSTAR_TOKEN=${BINSTAR_TOKEN:-}
 
-set -x
 docker info
 
 config=$(cat <<CONDARC
