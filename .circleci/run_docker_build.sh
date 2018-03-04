@@ -5,10 +5,14 @@
 # changes to this script, consider a proposal to conda-smithy so that other feedstocks can also
 # benefit from the improvement.
 
-set -e
+set -euo pipefail
+
 FEEDSTOCK_ROOT=$(cd "$(dirname "$0")/.."; pwd;)
 RECIPE_ROOT=$FEEDSTOCK_ROOT/recipe
+# ensure BINSTAR_TOKEN is defined even if empty
+BINSTAR_TOKEN=${BINSTAR_TOKEN:-}
 
+set -x
 docker info
 
 config=$(cat <<CONDARC
@@ -25,7 +29,6 @@ show_channel_urls: true
 CONDARC
 )
 
-
 # In order for the conda-build process in the container to write to the mounted
 # volumes, we need to run with the same id as the host machine, which is
 # normally the owner of the mounted volumes, or at least has write permission
@@ -36,17 +39,15 @@ if hash docker-machine 2> /dev/null && docker-machine active > /dev/null; then
     HOST_USER_ID=$(docker-machine ssh $(docker-machine active) id -u)
 fi
 
-rm -f "$FEEDSTOCK_ROOT/build_artifacts/conda-forge-build-done"
-
 ARTIFACTS="$FEEDSTOCK_ROOT/build_artifacts"
 
 test -d "$ARTIFACTS" || mkdir "$ARTIFACTS"
-DONE_CANARY="$ARTIFACTS/conda-forge-build-done"
+DONE_CANARY="$ARTIFACTS/conda-forge-build-done-${CONFIG}"
 rm -f "$DONE_CANARY"
 
-cat << EOF > "$FEEDSTOCK_ROOT/.circleci/build.sh"
+cat << EOF > "$FEEDSTOCK_ROOT/.circleci/build-${CONFIG}.sh"
 
-set -e
+set -xeuo pipefail
 export PYTHONUNBUFFERED=1
 
 echo "$config" > ~/.condarc
@@ -59,29 +60,18 @@ source run_conda_forge_build_setup
 conda build /home/conda/recipe_root -m /home/conda/feedstock_root/.ci_support/${CONFIG}.yaml --quiet
 upload_or_check_non_existence /home/conda/recipe_root conda-forge --channel=main -m /home/conda/feedstock_root/.ci_support/${CONFIG}.yaml
 
-touch /home/conda/feedstock_root/build_artifacts/conda-forge-build-done
+touch "/home/conda/feedstock_root/build_artifacts/conda-forge-build-done-${CONFIG}"
 EOF
 
-set +x
-echo "BINSTAR_TOKEN=${BINSTAR_TOKEN}" > "${FEEDSTOCK_ROOT}/.circleci/env"
-set -x
-
-# Create and run the container in two commands,
-# so the token env isn't on disk too long
-
-CONTAINER=$(docker create -t \
+docker run -it \
            -v "${RECIPE_ROOT}":/home/conda/recipe_root \
            -v "${FEEDSTOCK_ROOT}":/home/conda/feedstock_root \
-           --env-file ${FEEDSTOCK_ROOT}/.circleci/env \
-           -e CONFIG="${CONFIG}" \
-           -e HOST_USER_ID="${HOST_USER_ID}" \
+           -e CONFIG \
+           -e BINSTAR_TOKEN \
+           -e HOST_USER_ID \
            condaforge/linux-anvil \
            bash \
-           /home/conda/feedstock_root/.circleci/build.sh || exit $?)
-
-rm "${FEEDSTOCK_ROOT}/.circleci/env"
-# do it
-docker start -i $CONTAINER
+           /home/conda/feedstock_root/.circleci/build-${CONFIG}.sh
 
 # verify that the end of the script was reached
 test -f "$DONE_CANARY"
